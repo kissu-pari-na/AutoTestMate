@@ -14,6 +14,7 @@ public sealed class TestDesignerAgent : IAgent
     public string Name => "Designer";
     private readonly Kernel _kernel;
     private readonly IFlowPublisher _flow;
+    private readonly KernelPlugin _helperPlugin;
 
     public TestDesignerAgent(IFlowPublisher flow)
     {
@@ -27,7 +28,13 @@ public sealed class TestDesignerAgent : IAgent
         b.Services.AddSingleton<IFunctionInvocationFilter>(sp => new PublishingFunctionFilter(_flow));
 
         _kernel = b.Build();
-        _kernel.Plugins.AddFromObject(new SkHelperPlugin(), "Helper");
+        _helperPlugin = _kernel.Plugins.AddFromObject(new SkHelperPlugin(), "Helper");
+
+        // (Optional) Prove tools are registered
+    var tools = _kernel.Plugins.SelectMany(p => p).Select(f => $"{f.PluginName}.{f.Name}");
+    _ = _flow.PublishAsync(new FlowEvent(
+        FlowStage.PlanTests, "Agent:Tools.Registered", DateTimeOffset.UtcNow,
+        string.Join(", ", tools)));
     }
 
     public bool CanHandle(Workspace ws) => ws.Parsed is not null && ws.Plan is null;
@@ -37,7 +44,9 @@ public sealed class TestDesignerAgent : IAgent
         await _flow.PublishAsync(new FlowEvent(FlowStage.PlanTests, "Agent:Designer.Start", DateTimeOffset.UtcNow));
 
         var chat = _kernel.GetRequiredService<IChatCompletionService>();
-        var settings = new GeminiPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(), Temperature = 0.2 };
+        var settings = new GeminiPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Required(
+               _helperPlugin.ToList()
+            ), Temperature = 0.2 };
         var p = ws.Parsed!;
         var paramTypesCsv = string.Join(',', p.Parameters.Select(x => x.Type));
         var history = new ChatHistory();
@@ -51,10 +60,11 @@ to decide representative inputs (e.g., SafeSampleArgsCsv, IntEdgeCasesCsv, Strin
         // This line primes the model with a concrete call target:
         history.AddUserMessage($"ParamTypesCsv: {paramTypesCsv}");
         // Optional: suggest an obvious function to call:
-        history.AddUserMessage("""If there are primitive parameters, call Helper.SafeSampleArgsCsv(ParamTypesCsv) first.""");
+        history.AddUserMessage("""Must call Helper.SafeSampleArgsCsv(ParamTypesCsv) first.""");
 
         await _flow.PublishAsync(new FlowEvent(FlowStage.PlanTests, "SK:LLM.Request", DateTimeOffset.UtcNow));
         var resp = await chat.GetChatMessageContentAsync(history, executionSettings: settings, kernel: _kernel, cancellationToken: ct);
+        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:LLM.Response.Final", DateTimeOffset.UtcNow));
         var lines = (resp.Content ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                                          .Where(l => l.StartsWith("CASE:", StringComparison.OrdinalIgnoreCase)).ToList();
 

@@ -11,10 +11,10 @@ public sealed class PublishingPromptFilter : IPromptRenderFilter
 
     public async Task OnPromptRenderAsync(PromptRenderContext ctx, Func<PromptRenderContext, Task> next)
     {
-        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:Prompt.Render.Start", DateTimeOffset.UtcNow, ctx.Function?.Name));
+        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "PromptRender:Start", DateTimeOffset.UtcNow, ctx.Function?.Name));
         await next(ctx);
-        var preview = (ctx.RenderedPrompt ?? string.Empty);
-        if (preview.Length > 400) preview = preview[..400] + " â€¦";
-        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:Prompt.Render.Done", DateTimeOffset.UtcNow, preview));
+        var preview = ctx.RenderedPrompt ?? string.Empty;
+        if (preview.Length > 400) preview = preview[..400] + " ";
+        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "PromptRender:Done", DateTimeOffset.UtcNow, preview));
     }
 }

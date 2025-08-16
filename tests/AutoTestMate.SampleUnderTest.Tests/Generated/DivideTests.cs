@@ -9,25 +9,25 @@ namespace AutoTestMate.SampleUnderTest.Tests
         [Theory]
         [InlineData(10, 2, 5)]
         [InlineData(0, 5, 0)]
-        [InlineData(15, 3, 5)]
+        [InlineData(100, 10, 10)]
         public void Divide_ValidInputs_ReturnsCorrectResult(int a, int b, int expected)
         {
             // Arrange
             var snippet = new SnippetClass();
 
             // Act
-            var result = snippet.Divide(a, b);
+            int result = snippet.Divide(a, b);
 
             // Assert
             Assert.Equal(expected, result);
         }
 
         [Theory]
-        [InlineData(10,0)]
-        [InlineData(5,0)]
+        [InlineData(10, 0)]
         [InlineData(0,0)]
+        [InlineData(-10,0)]
 
-        public void Divide_DivideByZero_ThrowsException(int a, int b)
+        public void Divide_DivideByZero_ThrowsDivideByZeroException(int a, int b)
         {
             // Arrange
             var snippet = new SnippetClass();
@@ -38,20 +38,35 @@ namespace AutoTestMate.SampleUnderTest.Tests
 
 
         [Fact]
-        public void Divide_MaxValues_ReturnsCorrectResult()
+        public void Divide_MaxInt_ReturnsCorrectResult()
         {
             // Arrange
             var snippet = new SnippetClass();
             int a = int.MaxValue;
-            int b = 2;
-            int expected = int.MaxValue / 2;
+            int b = 1;
+            int expected = int.MaxValue;
 
             // Act
-            var result = snippet.Divide(a, b);
+            int result = snippet.Divide(a, b);
 
             // Assert
             Assert.Equal(expected, result);
+        }
 
+        //Helper functions (replace with your actual helper functions if needed)
+        public static class Helper
+        {
+            public static string SafeSampleArgsCsv(string types)
+            {
+                //This is a placeholder.  Replace with your actual CSV generation logic.
+                if (types == "int,int") return "10,2;0,5;100,10;10,0;0,0;-10,0;2147483647,1";
+                return ""; // Or throw an exception if types are not supported
+            }
+
+            public static string IntEdgeCasesCsv()
+            {
+                return "2147483647,1; -2147483648,1; 0,1; 1,1";
+            }
         }
     }
 }

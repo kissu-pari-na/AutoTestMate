@@ -1,5 +1,6 @@
 using System.Text;
 using AutoTestMate.Application.Abstractions;
+using AutoTestMate.Domain;
 using AutoTestMate.Infrastructure.SK;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel;
@@ -13,12 +14,13 @@ public sealed class SKTestGenerationService : ITestGenerationService
 {
     private readonly Kernel _kernel;
     private readonly IFlowPublisher _flow;
+    private readonly KernelPlugin _helperPlugin;
 
     public SKTestGenerationService(IFlowPublisher flow)
     {
         _flow = flow;
         var apiKey = Environment.GetEnvironmentVariable("GOOGLE_AI_API_KEY") ?? throw new InvalidOperationException("Set GOOGLE_AI_API_KEY");
-        Console.WriteLine($"Using Google API key: {apiKey.Substring(0,7)}..."); // Log the first few characters for debugging
+        Console.WriteLine($"Using Google API key: {apiKey.Substring(0, 7)}..."); // Log the first few characters for debugging
         if (string.IsNullOrEmpty(apiKey))
             throw new InvalidOperationException("GOOGLE_AI_API_KEY environment variable is not set.");
         var b = Kernel.CreateBuilder();
@@ -26,7 +28,13 @@ public sealed class SKTestGenerationService : ITestGenerationService
         b.Services.AddSingleton<IPromptRenderFilter>(sp => new PublishingPromptFilter(_flow));
         b.Services.AddSingleton<IFunctionInvocationFilter>(sp => new PublishingFunctionFilter(_flow));
         _kernel = b.Build();
-        _kernel.Plugins.AddFromObject(new SkHelperPlugin(), "Helper");
+        _helperPlugin = _kernel.Plugins.AddFromObject(new SkHelperPlugin(), "Helper");
+        
+        // (Optional) Prove tools are registered
+        var tools = _kernel.Plugins.SelectMany(p => p).Select(f => $"{f.PluginName}.{f.Name}");
+    _ = _flow.PublishAsync(new FlowEvent(
+        FlowStage.PlanTests, "SK:Tools.Registered", DateTimeOffset.UtcNow,
+        string.Join(", ", tools)));
     }
 
     public async Task<GeneratedTests> GenerateAsync(ParsedCode input, CancellationToken ct = default)
@@ -60,35 +68,38 @@ PARSED:
 - IsStatic: {input.IsStatic}
 - Parameters: {paramDecls}
 
-You may call: Helper.SafeSampleArgsCsv("{paramTypes}")
-OUTPUT: one C# file fenced as ```csharp â€¦ ```.
+You must call: Helper.SafeSampleArgsCsv("{paramTypes}")
+OUTPUT: one C# file fenced as ```csharp ```.
 """;
         var history = new ChatHistory();
         history.AddSystemMessage(sys);
         history.AddUserMessage(user);
 
-        await _flow.PublishAsync(new AutoTestMate.Domain.FlowEvent(AutoTestMate.Domain.FlowStage.GenerateTests, "SK:LLM.Request", DateTimeOffset.UtcNow));
-        var settings = new GeminiPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Auto() };
+        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:LLM.Request", DateTimeOffset.UtcNow));
+        var settings = new GeminiPromptExecutionSettings { FunctionChoiceBehavior = FunctionChoiceBehavior.Required(
+               _helperPlugin.ToList()
+            ), Temperature = 0.2 };
 
         var sb = new StringBuilder();
         await foreach (var update in chat.GetStreamingChatMessageContentsAsync(history, executionSettings: settings, kernel: _kernel, cancellationToken: ct))
         {
+            await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:LLM.Response", DateTimeOffset.UtcNow));
             foreach (var t in update.Items.OfType<StreamingTextContent>())
             {
                 if (!string.IsNullOrEmpty(t.Text))
                 {
                     sb.Append(t.Text);
-                    await _flow.PublishAsync(new AutoTestMate.Domain.FlowEvent(AutoTestMate.Domain.FlowStage.GenerateTests, "SK:Stream.Text", DateTimeOffset.UtcNow, t.Text));
+                    await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:Stream.Text", DateTimeOffset.UtcNow, t.Text));
                 }
             }
             foreach (var f in update.Items.OfType<StreamingFunctionCallUpdateContent>())
             {
                 var frag = f.Arguments ?? "";
-                if (frag.Length > 200) frag = frag[..200] + " â€¦";
-                await _flow.PublishAsync(new AutoTestMate.Domain.FlowEvent(AutoTestMate.Domain.FlowStage.GenerateTests, $"Func:Call {f.Name}", DateTimeOffset.UtcNow, frag));
+                if (frag.Length > 200) frag = frag[..200] + " ";
+                await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, $"Func:Call {f.Name}", DateTimeOffset.UtcNow, frag));
             }
         }
-        await _flow.PublishAsync(new AutoTestMate.Domain.FlowEvent(AutoTestMate.Domain.FlowStage.GenerateTests, "SK:LLM.Response.Final", DateTimeOffset.UtcNow));
+        await _flow.PublishAsync(new FlowEvent(FlowStage.GenerateTests, "SK:LLM.Response.Final", DateTimeOffset.UtcNow));
 
         var content = sb.ToString();
         int start = content.IndexOf("```csharp");
