@@ -9,7 +9,7 @@ and visualize everything live:
 
 ## Prereqs
 - .NET 8 SDK
-- Set `OPENAI_API_KEY` in your environment (OpenAI-compatible)
+- Set `GOOGLE_AI_API_KEY` in your environment (Google-compatible)
 
 ## Run
 Terminal 1 (Web UI):

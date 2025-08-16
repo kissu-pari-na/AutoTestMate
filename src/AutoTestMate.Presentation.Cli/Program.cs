@@ -1,18 +1,30 @@
 ﻿using AutoTestMate.Application.Abstractions;
 using AutoTestMate.Application.Agents;
+using AutoTestMate.Infrastructure.Agents;
 using AutoTestMate.Infrastructure.Flow;
+using AutoTestMate.Infrastructure.Generation;
+using AutoTestMate.Infrastructure.Parsing;
+using AutoTestMate.Infrastructure.Runner;
+using AutoTestMate.Infrastructure.Writing;
 
 var webHubUrl = "http://localhost:5173/flow";
 var testsDir  = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../tests/AutoTestMate.SampleUnderTest.Tests"));
 
 IFlowPublisher publisher          = new SignalRFlowPublisher(webHubUrl);
-ICodeParser parser                = null; // Initialize with a real implementation, e.g., RoslynCodeParser();
-ISourceUnderTestWriter srcWriter  = null; // Initialize with a real implementation, e.g., FileSystemSourceWriter(testsDir);
-ITestGenerationService gen        = null; // Initialize with a real implementation, e.g., RoslynTestGenerator();
-ITestWriter writer                = null; // Initialize with a real implementation, e.g., FileSystemTestWriter(testsDir);
-ITestRunner runner                = null; // Initialize with a real implementation, e.g., NUnitTestRunner(testsDir);
+ICodeParser parser                = new RoslynCodeParser();
+ISourceUnderTestWriter srcWriter  = new FileSystemSourceUnderTestWriter(Path.Combine(testsDir, "Generated"));
+ITestGenerationService gen        = new SKTestGenerationService(publisher);
+ITestWriter writer                = new FileSystemTestWriter(Path.Combine(testsDir, "Generated"));
+ITestRunner runner                = new DotNetTestRunner(testsDir, publisher);
 
-var agents = new List<IAgent>();
+var agents = new List<IAgent>
+{
+    new ParserAgent(parser, publisher),
+    new TestDesignerAgent(publisher),
+    new CodeGenAgent(gen, srcWriter, writer, publisher),
+    //new RunnerAgent(runner, publisher),
+    //new CriticAgent(publisher, maxRetries: 2)
+};
 
 var orch = new Orchestrator(agents, publisher);
 
