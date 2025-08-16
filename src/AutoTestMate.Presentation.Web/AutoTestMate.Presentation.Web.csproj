@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AutoTestMate.Application\AutoTestMate.Application.csproj" />
+    <ProjectReference Include="..\AutoTestMate.Infrastructure\AutoTestMate.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

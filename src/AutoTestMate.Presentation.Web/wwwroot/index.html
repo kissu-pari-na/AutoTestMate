@@ -1,0 +1,470 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoTestMate — Live Flow</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui; margin: 18px; }
+    .pulse { animation: pulse 0.6s ease-in-out; }
+    @keyframes pulse { 0%{ box-shadow: 0 0 0 0 rgba(251,113,133,0.6);} 100%{ box-shadow: 0 0 0 12px rgba(251,113,133,0);} }
+    .tc-tag { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; line-height:1; color:#111827; border:1px solid rgba(0,0,0,.08); }
+    .tc-leg { display:flex; gap:8px; align-items:center; margin:4px 0 10px; }
+    .tc-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+    .tc-tline { width:180px; height:16px; }
+    .tc-tlbl { font-size:10px; color:#6b7280; }
+    .tc-btn { padding:4px 8px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+    #gtl-wrap { border:1px solid #e5e7eb; border-radius:12px; padding:10px; margin-top:14px; }
+    #gtl-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+    .gtl-btn { padding:4px 8px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+    #gtl-svg { width:100%; height:80px; display:block; }
+    #gtl-legend { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:6px; }
+    #gtl-feed { max-height:280px; overflow:auto; border-top:1px solid #f3f4f6; margin-top:8px; }
+    .gtl-row { display:grid; grid-template-columns: 90px 120px 1fr; gap:8px; padding:8px 4px; border-bottom:1px solid #f3f4f6; font-family:ui-monospace; }
+    .gtl-row b { font-family: ui-sans-serif; }
+  </style>
+</head>
+<body>
+  <h1>AutoTestMate</h1>
+
+  <h3>Clean Architecture Pipeline</h3>
+  <div id="graph" class="mermaid">flowchart LR
+    A[UserInput] --> B[ParseCode]
+    B --> C[PlanTests]
+    C --> D[GenerateTests]
+    D --> E[WriteFiles]
+    E --> F[RunTests]
+    F --> G[Summarize]
+    classDef active fill:#dcfce7,stroke:#22c55e,stroke-width:2px;
+    classDef normal fill:#fff,stroke:#d4d4d8,stroke-width:1px;
+  </div>
+  <div id="counters" style="margin:8px 0;">
+    ✅ Passed: <strong id="cnt-pass">0</strong>
+    &nbsp;&nbsp;❌ Failed: <strong id="cnt-fail">0</strong>
+    <div style="font-size:12px;color:#6b7280;">Retries: <span id="cnt-retry">0</span></div>
+  </div>
+
+  <h3>Semantic Kernel — Under the Hood</h3>
+  <div id="sk-graph" class="mermaid">flowchart LR
+    PR[Prompt.Render] --> L1[LLM.Request]
+    L1 --> S[Stream.Text]
+    S --> LF[LLM.Final]
+    L1 --> TC[Func.Call]
+    TC --> TR[Func.Result]
+    TR --> L1
+    classDef active fill:#ffe4e6,stroke:#fb7185,stroke-width:2px;
+    classDef normal fill:#fff,stroke:#d4d4d8,stroke-width:1px;
+  </div>
+
+  <div style="margin-top:10px;">
+    <h4 style="display:flex;align-items:center;gap:8px;">
+      Tool Calls
+      <span id="tool-calls-count" style="background:#eef2ff;color:#3730a3;border-radius:999px;padding:2px 8px;font-size:12px;">0</span>
+    </h4>
+    <div class="tc-leg" id="tc-legend"></div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 10px;">
+      <input id="tc-search" placeholder="Search in args/results…" style="flex:1;min-width:240px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;">
+      <select id="tc-plugin" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;">
+        <option value="">All plugins</option>
+      </select>
+      <select id="tc-func" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;">
+        <option value="">All functions</option>
+      </select>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;"><input type="checkbox" id="tc-phase-call" checked> Call</label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;"><input type="checkbox" id="tc-phase-args" checked> Args</label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;"><input type="checkbox" id="tc-phase-result" checked> Result</label>
+      <button id="tc-export" class="tc-btn">Export JSON</button>
+      <button id="tc-clear" class="tc-btn" style="background:#fff1f2;border-color:#fee2e2;color:#b91c1c;">Clear</button>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;font-family:ui-monospace;">
+      <thead>
+        <tr>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px 4px;">Time</th>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px 4px;">Plugin</th>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px 4px;">Function</th>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px 4px;">Timeline</th>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px 4px;">Info</th>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px 4px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tool-calls-body"></tbody>
+    </table>
+    <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:8px;">
+      <button id="tc-prev" class="tc-btn">Prev</button>
+      <span id="tc-page" style="font-size:12px;color:#6b7280;">Page 1</span>
+      <button id="tc-next" class="tc-btn">Next</button>
+    </div>
+  </div>
+
+  <div id="gtl-wrap">
+    <h3 style="margin:0 0 6px;">Global Timeline</h3>
+    <div id="gtl-controls">
+      <label><input type="checkbox" id="gtl-cat-orch" checked> Orchestrator</label>
+      <label><input type="checkbox" id="gtl-cat-agents" checked> Agents</label>
+      <label><input type="checkbox" id="gtl-cat-ski" checked> SK Internals</label>
+      <label><input type="checkbox" id="gtl-cat-func" checked> Function calling</label>
+      <label><input type="checkbox" id="gtl-cat-tool" checked> Tool calling</label>
+      <label><input type="checkbox" id="gtl-cat-plug" checked> Plugins</label>
+      <label><input type="checkbox" id="gtl-cat-gpub" checked> GraphPublisher</label>
+      <input id="gtl-search" placeholder="Search message/data…" style="flex:1;min-width:220px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;">
+      <button id="gtl-zoom-in" class="gtl-btn">Zoom +</button>
+      <button id="gtl-zoom-out" class="gtl-btn">Zoom –</button>
+      <button id="gtl-clear" class="gtl-btn" style="background:#fff1f2;border-color:#fee2e2;color:#b91c1c;">Clear</button>
+      <button id="gtl-export" class="gtl-btn">Export JSON</button>
+    </div>
+    <svg id="gtl-svg"></svg>
+    <div id="gtl-legend"></div>
+    <div id="gtl-feed"></div>
+  </div>
+
+  <h3>Agents — Collaboration</h3>
+  <div id="agents-graph" class="mermaid">flowchart LR
+    P[Parser] --> D[Designer]
+    D --> G[CodeGen]
+    G --> R[Runner]
+    R --> S[Summary]
+    classDef active fill:#e0f2fe,stroke:#38bdf8,stroke-width:2px;
+    classDef normal fill:#fff,stroke:#d4d4d8,stroke-width:1px;
+  </div>
+
+<script>
+  mermaid.initialize({ startOnLoad: false });
+
+  const renderPipeline = (active) => {
+    const def = [
+      'flowchart LR',
+      'A[UserInput]:::A --> B[ParseCode]:::B',
+      'B --> C[PlanTests]:::C',
+      'C --> D[GenerateTests]:::D',
+      'D --> E[WriteFiles]:::E',
+      'E --> F[RunTests]:::F',
+      'F --> G[Summarize]:::G',
+      'classDef active fill:#dcfce7,stroke:#22c55e,stroke-width:2px;',
+      'classDef normal fill:#fff,stroke:#d4d4d8,stroke-width:1px;'
+    ];
+    const ids = {A:'A',B:'B',C:'C',D:'D',E:'E',F:'F',G:'G'};
+    Object.keys(ids).forEach(k => def.push(`class ${ids[k]} ${active===k ? 'active':'normal'};`));
+    const el = document.getElementById('graph');
+    el.innerHTML = def.join('\n');
+    mermaid.init(undefined, el);
+  };
+  renderPipeline(null);
+
+  const renderSk = (active) => {
+    const def = [
+      'flowchart LR',
+      'PR[Prompt.Render]:::PR --> L1[LLM.Request]:::L1',
+      'L1 --> S[Stream.Text]:::S',
+      'S --> LF[LLM.Final]:::LF',
+      'L1 --> TC[Func.Call]:::TC',
+      'TC --> TR[Func.Result]:::TR',
+      'TR --> L1',
+      'classDef active fill:#ffe4e6,stroke:#fb7185,stroke-width:2px;',
+      'classDef normal fill:#fff,stroke:#d4d4d8,stroke-width:1px;'
+    ];
+    const ids = {PR:'PR',L1:'L1',S:'S',TC:'TC',TR:'TR',LF:'LF'};
+    Object.keys(ids).forEach(k => def.push(`class ${ids[k]} ${active===k ? 'active':'normal'};`));
+    const el = document.getElementById('sk-graph');
+    el.innerHTML = def.join('\n');
+    mermaid.init(undefined, el);
+  };
+  renderSk(null);
+
+  const renderAgents = (active) => {
+    const parts = [
+      'flowchart LR',
+      'P[Parser]:::P --> D[Designer]:::D',
+      'D --> G[CodeGen]:::G',
+      'G --> R[Runner]:::R',
+      'R --> S[Summary]:::S',
+      'classDef active fill:#e0f2fe,stroke:#38bdf8,stroke-width:2px;',
+      'classDef normal fill:#fff,stroke:#d4d4d8,stroke-width:1px;'
+    ];
+    const ids = { Parser:'P', Designer:'D', CodeGen:'G', Runner:'R', Summary:'S' };
+    Object.keys(ids).forEach(k => parts.push(`class ${ids[k]} ${active===k ? 'active':'normal'};`));
+    const el = document.getElementById('agents-graph');
+    el.innerHTML = parts.join('\n');
+    mermaid.init(undefined, el);
+  };
+  renderAgents(null);
+
+  const conn = new signalR.HubConnectionBuilder().withUrl('/flow').withAutomaticReconnect().build();
+  conn.start().then(()=>console.log('SignalR connected')).catch(console.error);
+
+  // Counters
+  let pass = 0, fail = 0, retry = 0;
+  const passEl = document.getElementById('cnt-pass');
+  const failEl = document.getElementById('cnt-fail');
+  const retryEl= document.getElementById('cnt-retry');
+
+  // Tool Calls enhanced state
+  const TC_PALETTE = ["#fde047","#93c5fd","#a7f3d0","#fca5a5","#c4b5fd","#fdba74","#86efac","#f9a8d4","#99f6e4","#fecaca","#d8b4fe","#fef08a"];
+  const colorFor = (key) => {
+    if (!key) return "#e5e7eb";
+    let h=0; for (let i=0;i<key.length;i++) h=(h*31+key.charCodeAt(i))|0;
+    return TC_PALETTE[Math.abs(h)%TC_PALETTE.length];
+  };
+  const $tcBody = document.getElementById('tool-calls-body');
+  const $tcCount= document.getElementById('tool-calls-count');
+  const $tcPlugin=document.getElementById('tc-plugin');
+  const $tcFunc  =document.getElementById('tc-func');
+  const $tcSearch=document.getElementById('tc-search');
+  const $tcPhaseCall=document.getElementById('tc-phase-call');
+  const $tcPhaseArgs=document.getElementById('tc-phase-args');
+  const $tcPhaseResult=document.getElementById('tc-phase-result');
+  const $tcPrev=document.getElementById('tc-prev');
+  const $tcNext=document.getElementById('tc-next');
+  const $tcPage=document.getElementById('tc-page');
+  const $tcExport=document.getElementById('tc-export');
+  const $tcClear=document.getElementById('tc-clear');
+  const tcLegend=document.getElementById('tc-legend');
+
+  const MAX_CALLS=200; let tcData=[]; let tcCurrentId=null; let tcPageSize=10, tcPageIndex=0;
+
+  const pretty=(x)=>{ if(!x) return ''; try{return JSON.stringify(JSON.parse(x),null,2);}catch{return x;} };
+  const parsePluginFunc=(msg)=>{
+    const idx=msg.lastIndexOf(' '); if(idx<0) return {plugin:'',func:msg};
+    const pf=msg.slice(idx+1).trim(); const dot=pf.indexOf('.');
+    if(dot>0) return {plugin:pf.slice(0,dot), func:pf.slice(dot+1)};
+    return {plugin:'', func:pf};
+  };
+  const dedupePush=(row)=>{ tcData.unshift(row); if(tcData.length>MAX_CALLS) tcData.pop(); $tcCount.textContent=tcData.length; };
+  const refreshFilters=()=>{
+    const plugins=[...new Set(tcData.map(x=>x.plugin))].filter(Boolean).sort();
+    const funcs=[...new Set(tcData.map(x=>x.func))].filter(Boolean).sort();
+    const fill=(sel,vals,label)=>{ const keep=sel.value; sel.innerHTML=`<option value="">All ${label}</option>`; vals.forEach(v=>{const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o);}); if(vals.includes(keep)) sel.value=keep; };
+    fill($tcPlugin, plugins, "plugins"); fill($tcFunc, funcs, "functions");
+    tcLegend.innerHTML = plugins.map(p=>`<span class="tc-dot" style="background:${colorFor(p)}"></span><span class="tc-tlbl">${p}</span>`).join('<span style="width:8px;"></span>');
+  };
+  const timelineSvg=(row)=>{
+    const t0=row.tCall||row.time;
+    const t1=row.tArgs && row.tArgs>=t0 ? row.tArgs : null;
+    const t2=row.tResult && (t1 ? row.tResult>=t1 : row.tResult>=t0) ? row.tResult : null;
+    const end = t2 || t1 || (t0+1);
+    const span = Math.max(1, end - t0);
+    const W=180, H=16, Y=8;
+    const xCall=0;
+    const xArgs = t1!==null ? Math.round(((t1 - t0)/span) * W) : null;
+    const xResult = t2!==null ? Math.round(((t2 - t0)/span) * W) : null;
+    const col=colorFor(row.plugin);
+    const seg1 = xArgs!==null ? `<rect x="${xCall}" y="${Y-3}" width="${Math.max(1,xArgs-xCall)}" height="6" fill="${col}" opacity="0.35"/>` : '';
+    const seg2 = (xArgs!==null && xResult!==null) ? `<rect x="${xArgs}" y="${Y-3}" width="${Math.max(1,xResult-xArgs)}" height="6" fill="${col}" opacity="0.65"/>` : '';
+    const dot = `<circle cx="${xResult ?? xArgs ?? xCall}" cy="${Y}" r="3" fill="${col}"/>`;
+    const tip = `Call${t1?` • Args +${(t1-t0)}ms`:''}${t2?` • Result +${(t2-t0)}ms`:''}`;
+    return `<svg class="tc-tline" viewBox="0 0 ${W} ${H}" title="${tip}"><line x1="0" y1="${Y}" x2="${W}" y2="${Y}" stroke="#e5e7eb" stroke-width="1"/>${seg1}${seg2}${dot}</svg>`;
+  };
+  const applyFilters=()=>{
+    const q=($tcSearch.value||'').toLowerCase(); const plugin=$tcPlugin.value; const func=$tcFunc.value;
+    const phases={Call:$tcPhaseCall.checked, Args:$tcPhaseArgs.checked, Result:$tcPhaseResult.checked};
+    const flattened=[];
+    tcData.forEach(row=>{
+      const rows=[];
+      if(phases.Call) rows.push({ ...row, phase:'Call', data:`${row.plugin}.${row.func}` });
+      if(phases.Args && row.args) rows.push({ ...row, phase:'Args', data:row.args });
+      if(phases.Result && row.result) rows.push({ ...row, phase:'Result', data:row.result });
+      rows.forEach(r=>{
+        if (plugin && r.plugin!==plugin) return;
+        if (func && r.func!==func) return;
+        if (q && !String(r.data).toLowerCase().includes(q)) return;
+        flattened.push(r);
+      });
+    });
+    return flattened;
+  };
+  const renderTable=()=>{
+    const items=applyFilters(); const totalPages=Math.max(1, Math.ceil(items.length/tcPageSize));
+    tcPageIndex=Math.min(tcPageIndex, totalPages-1); document.getElementById('tc-page').textContent=`Page ${tcPageIndex+1} / ${totalPages}`;
+    const pageItems=items.slice(tcPageIndex*tcPageSize, tcPageIndex*tcPageSize + tcPageSize);
+    $tcBody.innerHTML="";
+    pageItems.forEach(r=>{
+      const t=new Date(r.time).toLocaleTimeString(); const tagColor=colorFor(r.plugin); const info=(r.phase==='Call'?`Call ${r.plugin}.${r.func}`:r.phase);
+      const dataPretty = (()=>{ try{return JSON.stringify(JSON.parse(r.data),null,2);}catch{return r.data||'';} })();
+      const tr=document.createElement('tr');
+      tr.innerHTML = `
+        <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;">${t}</td>
+        <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;"><span class="tc-tag" style="background:${tagColor}33;border-color:${tagColor}66;">${r.plugin||''}</span></td>
+        <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;">${r.func||''}</td>
+        <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;">${timelineSvg(r)}</td>
+        <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;">
+          <div><strong>${info}</strong></div>
+          <details style="margin-top:4px;"><summary style="cursor:pointer;color:#2563eb;">${r.phase} details</summary>
+          <pre style="white-space:pre-wrap;margin:6px 0 0;">${dataPretty}</pre></details>
+        </td>
+        <td style="padding:6px 4px;border-bottom:1px solid #f3f4f6;"><button data-copy class="tc-btn">Copy</button></td>`;
+      tr.querySelector('[data-copy]').addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(dataPretty);}catch{} });
+      $tcBody.appendChild(tr);
+    });
+  };
+
+  $tcPrev.addEventListener('click', ()=>{ tcPageIndex=Math.max(0, tcPageIndex-1); renderTable(); });
+  $tcNext.addEventListener('click', ()=>{ const totalPages=Math.max(1, Math.ceil(applyFilters().length/tcPageSize)); tcPageIndex=Math.min(totalPages-1, tcPageIndex+1); renderTable(); });
+  [$tcSearch,$tcPlugin,$tcFunc,$tcPhaseCall,$tcPhaseArgs,$tcPhaseResult].forEach(el=> el.addEventListener('input', ()=>{ tcPageIndex=0; renderTable(); }));
+  $tcExport.addEventListener('click', ()=>{
+    const items=applyFilters(); const blob=new Blob([JSON.stringify(items,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`tool-calls-${new Date().toISOString().slice(0,19)}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  });
+  $tcClear.addEventListener('click', ()=>{ tcData=[]; tcCurrentId=null; $tcCount.textContent="0"; tcPageIndex=0; refreshFilters(); renderTable(); });
+
+  // Global Timeline (aligned to your terms)
+  const GT_COLORS = { orch:"#0ea5e9", agents:"#38bdf8", ski:"#fb7185", func:"#a78bfa", tool:"#22c55e", plug:"#f59e0b", gpub:"#64748b" };
+  const $svg   = document.getElementById('gtl-svg');
+  const $feed  = document.getElementById('gtl-feed');
+  const $legend= document.getElementById('gtl-legend');
+  const $q     = document.getElementById('gtl-search');
+  const $ckO = document.getElementById('gtl-cat-orch');
+  const $ckA = document.getElementById('gtl-cat-agents');
+  const $ckS = document.getElementById('gtl-cat-ski');
+  const $ckF = document.getElementById('gtl-cat-func');
+  const $ckT = document.getElementById('gtl-cat-tool');
+  const $ckP = document.getElementById('gtl-cat-plug');
+  const $ckG = document.getElementById('gtl-cat-gpub');
+  let gtl = []; let gtlZoom = 1.0;
+
+  const categorize = (evt) => {
+    const m = evt.message || "";
+    if (m.startsWith("Orchestrator:")) return "orch";
+    if (m.startsWith("Agent:") || m.includes("Agents:Start") || m.includes("Agents:Stop")) return "agents";
+    if (m.startsWith("GraphPublisher:")) return "gpub";
+    if (m.startsWith("SK:") && !m.startsWith("SK:Tool")) return "ski";
+    if (m.startsWith("Func:")) { if (m.includes(" Helper.")) return "plug"; return "func"; }
+    if (m.startsWith("SK:Tool.Call") && m.includes(" Helper.")) return "plug";
+    if (m.startsWith("Tool:")) return "tool";
+    return "orch";
+  };
+  const labelOf = (evt) => {
+    const m = evt.message || "";
+    if (m.startsWith("Orchestrator:")) return m.replace("Orchestrator:","");
+    if (m.startsWith("Agent:")) return m.replace("Agent:","").split(".")[0];
+    if (m.startsWith("GraphPublisher:")) return "GraphPublisher";
+    if (m.includes("Prompt.Render")) return "Prompt";
+    if (m.includes("LLM.Request")) return "LLM";
+    if (m.includes("Stream.Text")) return "LLM.Tok";
+    if (m.startsWith("Func:Call"))   return "Func.Call";
+    if (m.startsWith("Func:Args"))   return "Func.Args";
+    if (m.startsWith("Func:Result")) return "Func.Result";
+    if (m.startsWith("Tool:")) { const tail=m.split(":")[1]||""; return tail.split(".")[0]; }
+    return "Event";
+  };
+  const gtlPass = (row) => {
+    const f = { orch:$ckO.checked, agents:$ckA.checked, ski:$ckS.checked, func:$ckF.checked, tool:$ckT.checked, plug:$ckP.checked, gpub:$ckG.checked };
+    if (!f[row.cat]) return false;
+    const q = ($q.value||"").toLowerCase();
+    if (!q) return true;
+    return (row.msg.toLowerCase().includes(q) || String(row.data).toLowerCase().includes(q));
+  };
+  const renderLegend = () => {
+    $legend.innerHTML = [["orch","Orchestrator"],["agents","Agents"],["ski","SK Internals"],["func","Function calling"],["tool","Tool calling"],["plug","Plugins"],["gpub","GraphPublisher"]]
+      .map(([k,lab])=>`<span class="tc-dot" style="background:${GT_COLORS[k]}"></span><span class="tc-tlbl">${lab}</span>`).join('<span style="width:10px;"></span>');
+  };
+  const renderGlobalTimeline = () => {
+    renderLegend();
+    const items = gtl.filter(gtlPass);
+    if (items.length===0) { $svg.innerHTML=""; $feed.innerHTML=""; return; }
+    const tMin = items[0].t; const tMax = items[items.length-1].t; const span=Math.max(1, tMax-tMin);
+    const W = $svg.clientWidth || 800; const H = 80, mid = H/2;
+    const grid = `<line x1="0" y1="${mid}" x2="${W}" y2="${mid}" stroke="#e5e7eb" stroke-width="1"/>`;
+    const dots = items.map((r,i)=>{
+      const x = Math.max(2, Math.min(W-2, Math.round(((r.t - tMin)/span) * W * gtlZoom)));
+      const y = mid + Math.sin(i/3) * 18;
+      const c = GT_COLORS[r.cat] || "#9ca3af";
+      const tip = `${new Date(r.t).toLocaleTimeString()} • ${r.cat} • ${r.label}`;
+      return `<circle cx="${x}" cy="${y}" r="5" fill="${c}" opacity="0.85"><title>${tip}</title></circle>`;
+    }).join("");
+    $svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    $svg.innerHTML = grid + dots;
+    Array.from($svg.querySelectorAll('circle')).forEach((node, i) => {
+      node.addEventListener('click', () => {
+        const id = `gtl-${i}`; const el = document.getElementById(id);
+        if (el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.classList.add('pulse'); setTimeout(()=>el.classList.remove('pulse'),600); }
+      });
+    });
+    $feed.innerHTML = items.map((r,i)=>{
+      const t = new Date(r.t).toLocaleTimeString();
+      const c = GT_COLORS[r.cat] || "#9ca3af";
+      const data = (()=>{ try{return JSON.stringify(JSON.parse(String(r.data)),null,2);}catch{return String(r.data||"");} })();
+      return `<div id="gtl-${i}" class="gtl-row">
+        <div><span class="tc-dot" style="background:${c}"></span> ${t}</div>
+        <div><b>${r.cat}</b> • ${r.label}</div>
+        <div><div style="white-space:pre-wrap;"><b>${r.msg}</b>${data?`<pre style="margin:6px 0 0;white-space:pre-wrap;">${data}</pre>`:""}</div></div>
+      </div>`;
+    }).join("");
+  };
+  document.getElementById('gtl-zoom-in').addEventListener('click', ()=>{ gtlZoom=Math.min(5, gtlZoom+0.25); renderGlobalTimeline(); });
+  document.getElementById('gtl-zoom-out').addEventListener('click', ()=>{ gtlZoom=Math.max(0.25, gtlZoom-0.25); renderGlobalTimeline(); });
+  document.getElementById('gtl-clear').addEventListener('click', ()=>{ gtl=[]; renderGlobalTimeline(); });
+  document.getElementById('gtl-export').addEventListener('click', ()=>{
+    const filtered = gtl.filter(gtlPass);
+    const blob = new Blob([JSON.stringify(filtered,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`global-timeline-${new Date().toISOString().slice(0,19)}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  });
+  [document.getElementById('gtl-search'), document.getElementById('gtl-cat-orch'), document.getElementById('gtl-cat-agents'),
+   document.getElementById('gtl-cat-ski'), document.getElementById('gtl-cat-func'), document.getElementById('gtl-cat-tool'),
+   document.getElementById('gtl-cat-plug'), document.getElementById('gtl-cat-gpub')].forEach(el => el.addEventListener('input', renderGlobalTimeline));
+
+  // Hook event stream
+  const skContainer = document.getElementById('sk-graph');
+  const handleToolEvent = (evt) => {
+    const now = evt.at ? new Date(evt.at).getTime() : Date.now();
+    if (evt.message && evt.message.startsWith("Func:Call")) {
+      const pf = parsePluginFunc(evt.message);
+      tcCurrentId = (tcData[0]?.id || 0) + 1;
+      dedupePush({ id: tcCurrentId, time: now, plugin: pf.plugin, func: pf.func, args: "", result: "", tCall: now, tArgs: 0, tResult: 0 });
+      refreshFilters(); renderTable();
+      return;
+    }
+    if (evt.message === "Func:Args" && tcCurrentId != null) {
+      const row = tcData.find(r => r.id === tcCurrentId); if (row) { row.args = (evt.data || "").toString(); row.tArgs = now; }
+      renderTable(); return;
+    }
+    if (evt.message === "Func:Result" && tcCurrentId != null) {
+      const row = tcData.find(r => r.id === tcCurrentId); if (row) { row.result = (evt.data || "").toString(); row.tResult = now; }
+      renderTable(); return;
+    }
+  };
+
+  conn.on("flowEvent", (evt) => {
+    // Pipeline node
+    const mapStage = ['A','B','C','D','E','F','G'][evt.stage] || null;
+    if (mapStage) renderPipeline(mapStage);
+
+    // Test counters based on Tool:dotnet.test.*
+    if (evt.message === "Tool:dotnet.test.Pass") { pass++; passEl.textContent = pass; }
+    if (evt.message === "Tool:dotnet.test.Fail") { fail++; failEl.textContent = fail; }
+    if (evt.message && evt.message.startsWith("Agent:Runner.Start")) { pass=0; fail=0; passEl.textContent='0'; failEl.textContent='0'; }
+
+    // Agents graph highlight
+    if (evt.message && evt.message.startsWith("Agent:Parser"))   renderAgents("Parser");
+    if (evt.message && evt.message.startsWith("Agent:Designer")) renderAgents("Designer");
+    if (evt.message && evt.message.startsWith("Agent:CodeGen"))  renderAgents("CodeGen");
+    if (evt.message && evt.message.startsWith("Agent:Runner"))   renderAgents("Runner");
+    if (evt.message && evt.message.startsWith("Agent:Critic"))   { retry++; retryEl.textContent = String(retry); renderAgents("Designer"); }
+    if (evt.message && evt.message.includes("Orchestrator:Stop")) renderAgents("Summary");
+
+    // SK internals
+    if (evt.message?.includes("SK:Stream.Text")) {
+      skContainer.classList.remove('pulse'); void skContainer.offsetWidth; skContainer.classList.add('pulse');
+      renderSk("S");
+    } else if (evt.message?.includes("SK:LLM.Request")) renderSk("L1");
+    else if (evt.message?.includes("SK:Prompt.Render")) renderSk("PR");
+    else if (evt.message?.startsWith("Func:Call")) renderSk("TC");
+    else if (evt.message==="Func:Result") renderSk("TR");
+    else if (evt.message?.includes("SK:LLM.Response.Final")) renderSk("LF");
+
+    // Tool Calls table
+    handleToolEvent(evt);
+
+    // Global timeline
+    const t = evt.at ? new Date(evt.at).getTime() : Date.now();
+    const cat = categorize(evt);
+    const row = { t, cat, label: labelOf(evt), msg: evt.message || "", data: evt.data || "", raw: evt };
+    gtl.push(row); if (gtl.length > 400) gtl.shift();
+    renderGlobalTimeline();
+  });
+</script>
+</body>
+</html>

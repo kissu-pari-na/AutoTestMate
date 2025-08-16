@@ -1,10 +1,11 @@
 ﻿using AutoTestMate.Application.Abstractions;
 using AutoTestMate.Application.Agents;
+using AutoTestMate.Infrastructure.Flow;
 
 var webHubUrl = "http://localhost:5173/flow";
 var testsDir  = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../tests/AutoTestMate.SampleUnderTest.Tests"));
 
-IFlowPublisher publisher          = null; // Initialize with a real implementation, e.g., WebFlowPublisher(webHubUrl);
+IFlowPublisher publisher          = new SignalRFlowPublisher(webHubUrl);
 ICodeParser parser                = null; // Initialize with a real implementation, e.g., RoslynCodeParser();
 ISourceUnderTestWriter srcWriter  = null; // Initialize with a real implementation, e.g., FileSystemSourceWriter(testsDir);
 ITestGenerationService gen        = null; // Initialize with a real implementation, e.g., RoslynTestGenerator();
